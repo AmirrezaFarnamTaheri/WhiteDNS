@@ -56,6 +56,19 @@ class WhiteDnsModelsTest {
     }
 
     @Test
+    fun resolveDisablesSocksAuthenticationWhenCredentialsAreBlank() {
+        val resolvedSettings = WhiteDnsSettings(
+            socks5Authentication = true,
+            socksUsername = "   ",
+            socksPassword = "secret",
+        ).resolve()
+
+        assertEquals(false, resolvedSettings.socks5Authentication)
+        assertEquals("   ", resolvedSettings.socksUsername)
+        assertEquals("secret", resolvedSettings.socksPassword)
+    }
+
+    @Test
     fun syncSelectedConnectionProfileFieldsUsesSelectedResolverProfileText() {
         val resolverProfile = ResolverProfile(
             id = "resolver-main",
@@ -315,6 +328,27 @@ class WhiteDnsModelsTest {
         assertEquals(true, resolvedSettings.trafficWarmupEnabled)
         assertEquals(10, resolvedSettings.trafficWarmupProbeCount)
         assertEquals(2, resolvedSettings.trafficKeepaliveIntervalSeconds)
+    }
+
+    @Test
+    fun resolveNormalizesVpnIpv6StrategyAndMtuPreset() {
+        val defaultResolvedSettings = WhiteDnsSettings(
+            vpnIpv6Strategy = "invalid",
+            vpnMtuPreset = "invalid",
+            vpnCustomMtu = "42",
+        ).resolve()
+        val customResolvedSettings = WhiteDnsSettings(
+            vpnIpv6Strategy = WhiteDnsOptions.VpnIpv6StrategyBypass,
+            vpnMtuPreset = WhiteDnsOptions.VpnMtuPresetCustom,
+            vpnCustomMtu = "99999",
+        ).resolve()
+
+        assertEquals(WhiteDnsOptions.VpnIpv6StrategyBlock, defaultResolvedSettings.vpnIpv6Strategy)
+        assertEquals(WhiteDnsOptions.VpnMtuPreset1500, defaultResolvedSettings.vpnMtuPreset)
+        assertEquals(1500, defaultResolvedSettings.vpnMtu)
+        assertEquals(WhiteDnsOptions.VpnIpv6StrategyBypass, customResolvedSettings.vpnIpv6Strategy)
+        assertEquals(WhiteDnsOptions.VpnMtuPresetCustom, customResolvedSettings.vpnMtuPreset)
+        assertEquals(9000, customResolvedSettings.vpnMtu)
     }
 
     @Test

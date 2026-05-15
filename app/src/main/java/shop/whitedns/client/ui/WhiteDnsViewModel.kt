@@ -34,6 +34,7 @@ import shop.whitedns.client.model.ConnectionVerificationState
 import shop.whitedns.client.model.ConnectionVerificationStatus
 import shop.whitedns.client.model.ResolverRuntimeState
 import shop.whitedns.client.model.StormDnsServerProfile
+import shop.whitedns.client.model.WhiteDnsProxyExposurePolicy
 import shop.whitedns.client.model.WhiteDnsRuntimeProxy
 import shop.whitedns.client.model.WhiteDnsSettings
 import shop.whitedns.client.model.WhiteDnsSettingsStore
@@ -307,6 +308,14 @@ class WhiteDnsViewModel(
                 runCatching {
                     val resolvedSettings = runtimeSettings.resolve()
                     activeProxyListenPort = resolvedSettings.listenPort
+                    if (
+                        resolvedSettings.connectionMode == "proxy" &&
+                        WhiteDnsProxyExposurePolicy.requiresCompleteSocksCredentials(resolvedSettings)
+                    ) {
+                        throw IllegalStateException(
+                            "Set a SOCKS5 username and password before listening on a LAN-reachable address",
+                        )
+                    }
                     val modeLabel = if (resolvedSettings.connectionMode == "vpn") {
                         "Full System VPN"
                     } else {

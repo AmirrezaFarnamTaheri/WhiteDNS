@@ -31,6 +31,7 @@ import shop.whitedns.client.MainActivity
 import shop.whitedns.client.R
 import shop.whitedns.client.model.ResolvedWhiteDnsSettings
 import shop.whitedns.client.model.StormDnsServerProfile
+import shop.whitedns.client.model.WhiteDnsProxyExposurePolicy
 import shop.whitedns.client.model.WhiteDnsSettings
 import shop.whitedns.client.model.WhiteDnsSettingsStore
 import shop.whitedns.client.model.resolve
@@ -156,6 +157,11 @@ class WhiteDnsProxyService : Service() {
                     }
                     if (resolvedSettings.resolverEntries.isEmpty()) {
                         throw IllegalStateException("Resolvers are required to connect")
+                    }
+                    if (WhiteDnsProxyExposurePolicy.requiresCompleteSocksCredentials(resolvedSettings)) {
+                        throw IllegalStateException(
+                            "SOCKS5 username and password are required when the proxy listens on a LAN-reachable address",
+                        )
                     }
                     val serverProfile = launchRequest.serverProfile
 
@@ -287,6 +293,7 @@ class WhiteDnsProxyService : Service() {
                 socksPassword = if (resolvedSettings.socks5Authentication) resolvedSettings.socksPassword else null,
                 onOutput = ::logInfo,
             )
+            logInfo("HTTP proxy bridge limits: ${httpProxyBridge.stats().toDiagnosticText()}")
         }.onFailure { error ->
             logWarning("HTTP proxy bridge was not started: ${error.message ?: error::class.java.simpleName}")
         }
@@ -357,6 +364,10 @@ class WhiteDnsProxyService : Service() {
 
     private fun stopProxyRuntime() {
         stopTrafficKeepalive()
+        val bridgeStats = httpProxyBridge.stats()
+        if (bridgeStats.acceptedClients > 0 || bridgeStats.rejectedClients > 0 || bridgeStats.rejectedTunnels > 0) {
+            logInfo("HTTP proxy bridge stopped: ${bridgeStats.toDiagnosticText()}")
+        }
         httpProxyBridge.stop()
         runCatching {
             stormDnsProcessManager.stop()
@@ -543,6 +554,12 @@ class WhiteDnsProxyService : Service() {
                 .putExtra(BroadcastExtraSessionId, currentSessionId)
                 .putExtra(BroadcastExtraMessage, message),
         )
+    }
+
+    private fun HttpProxyBridgeStats.toDiagnosticText(): String {
+        return "clients active=$activeClients accepted=$acceptedClients rejected=$rejectedClients; " +
+            "tunnels active=$activeTunnelDirections rejected=$rejectedTunnels; " +
+            "headerRejects=$headerLimitRejections badRequests=$badRequestCount"
     }
 
     companion object {

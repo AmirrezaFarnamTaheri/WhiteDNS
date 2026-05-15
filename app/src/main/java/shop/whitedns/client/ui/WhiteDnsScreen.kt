@@ -132,6 +132,7 @@ import shop.whitedns.client.model.ConnectionVerificationStatus
 import shop.whitedns.client.model.ResolverProfile
 import shop.whitedns.client.model.ResolverRuntimeState
 import shop.whitedns.client.model.WhiteDnsOptions
+import shop.whitedns.client.model.WhiteDnsProxyExposurePolicy
 import shop.whitedns.client.model.WhiteDnsSettings
 import shop.whitedns.client.model.WhiteDnsUiState
 import shop.whitedns.client.model.applyResolverProfileToSelectedConnection
@@ -166,6 +167,7 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import java.util.Locale
+import java.util.UUID
 
 @Composable
 fun WhiteDnsScreen(
@@ -1329,6 +1331,7 @@ private fun AdvancedSettingsFields(
     showProxySettings: Boolean,
     onSettingsChange: (WhiteDnsSettings) -> Unit,
 ) {
+    val context = LocalContext.current
     GroupLabel("MTU")
     MtuSettingsGroup(
         settings = settings,
@@ -1344,6 +1347,12 @@ private fun AdvancedSettingsFields(
 
     SectionDivider()
     if (showProxySettings) {
+        val lanReachableProxy = WhiteDnsProxyExposurePolicy.isLanReachableListenIp(settings.listenIp)
+        val lanProxyProtected = WhiteDnsProxyExposurePolicy.hasCompleteSocksCredentials(
+            enabled = settings.socks5Authentication,
+            username = settings.socksUsername,
+            password = settings.socksPassword,
+        )
         GroupLabel("Local Proxy")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             WhiteDnsTextField(
@@ -1390,6 +1399,69 @@ private fun AdvancedSettingsFields(
             )
         }
 
+        AnimatedVisibility(
+            visible = lanReachableProxy,
+            enter = fadeIn(animationSpec = tween(220)) + expandVertically(animationSpec = tween(220)),
+            exit = fadeOut(animationSpec = tween(160)) + shrinkVertically(animationSpec = tween(160)),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(WhiteDnsPalette.WarningSurface)
+                    .border(1.dp, WhiteDnsPalette.WarningText.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.WarningAmber,
+                        contentDescription = null,
+                        tint = WhiteDnsPalette.WarningText,
+                    )
+                    Text(
+                        text = if (lanProxyProtected) {
+                            "LAN-reachable proxy is protected by SOCKS5 authentication."
+                        } else {
+                            "LAN-reachable proxy requires a SOCKS5 username and password before connecting."
+                        },
+                        color = WhiteDnsPalette.WarningText,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CompactActionButton(
+                        modifier = Modifier.weight(1f),
+                        label = "ENABLE AUTH",
+                        emphasized = !lanProxyProtected,
+                        enabled = true,
+                        onClick = {
+                            onSettingsChange(
+                                settings.copy(
+                                    socks5Authentication = true,
+                                    socksPassword = settings.socksPassword.ifBlank { generateSocksPassword() },
+                                ),
+                            )
+                        },
+                    )
+                    CompactActionButton(
+                        modifier = Modifier.weight(1f),
+                        label = "COPY ADDRESS",
+                        emphasized = false,
+                        enabled = true,
+                        onClick = {
+                            copyTextToClipboard(
+                                context = context,
+                                label = "SOCKS5 proxy",
+                                text = "${settings.listenIp.trim().ifBlank { "127.0.0.1" }}:${settings.listenPort}",
+                                sensitive = false,
+                            )
+                        },
+                    )
+                }
+            }
+        }
+
         ToggleRow(
             label = "SOCKS5 Authentication",
             enabled = settings.socks5Authentication,
@@ -1421,9 +1493,73 @@ private fun AdvancedSettingsFields(
                         visualTransformation = PasswordVisualTransformation(),
                     )
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CompactActionButton(
+                        modifier = Modifier.weight(1f),
+                        label = "REGENERATE PASSWORD",
+                        emphasized = false,
+                        enabled = true,
+                        onClick = {
+                            onSettingsChange(settings.copy(socksPassword = generateSocksPassword()))
+                        },
+                    )
+                    CompactActionButton(
+                        modifier = Modifier.weight(1f),
+                        label = "COPY PASSWORD",
+                        emphasized = false,
+                        enabled = settings.socksPassword.isNotBlank(),
+                        onClick = {
+                            copyTextToClipboard(
+                                context = context,
+                                label = "SOCKS5 password",
+                                text = settings.socksPassword,
+                                sensitive = true,
+                            )
+                        },
+                    )
+                }
             }
         }
 
+        SectionDivider()
+    }
+
+    if (settings.connectionMode == "vpn") {
+        GroupLabel("VPN Behavior")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WhiteDnsDropdownField(
+                modifier = Modifier.weight(1f),
+                label = "IPv6 Strategy",
+                value = settings.vpnIpv6Strategy,
+                options = WhiteDnsOptions.vpnIpv6Strategies,
+                onValueChange = { onSettingsChange(settings.copy(vpnIpv6Strategy = it)) },
+            )
+            WhiteDnsDropdownField(
+                modifier = Modifier.weight(1f),
+                label = "VPN MTU",
+                value = settings.vpnMtuPreset,
+                options = WhiteDnsOptions.vpnMtuPresets,
+                onValueChange = { onSettingsChange(settings.copy(vpnMtuPreset = it)) },
+            )
+        }
+        AnimatedVisibility(
+            visible = settings.vpnMtuPreset == WhiteDnsOptions.VpnMtuPresetCustom,
+            enter = fadeIn(animationSpec = tween(220)) + expandVertically(animationSpec = tween(220)),
+            exit = fadeOut(animationSpec = tween(160)) + shrinkVertically(animationSpec = tween(160)),
+        ) {
+            WhiteDnsTextField(
+                label = "Custom VPN MTU",
+                value = settings.vpnCustomMtu,
+                onValueChange = { onSettingsChange(settings.copy(vpnCustomMtu = it.filter(Char::isDigit))) },
+                placeholder = "1500",
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    capitalization = KeyboardCapitalization.None,
+                ),
+            )
+        }
+        VpnBehaviorNotice(settings.vpnIpv6Strategy)
         SectionDivider()
     }
 
@@ -1551,6 +1687,38 @@ private fun AdvancedSettingsFields(
         options = WhiteDnsOptions.logLevels,
         onValueChange = { onSettingsChange(settings.copy(logLevel = it)) },
     )
+}
+
+@Composable
+private fun VpnBehaviorNotice(ipv6Strategy: String) {
+    val strategyText = when (ipv6Strategy) {
+        WhiteDnsOptions.VpnIpv6StrategyBypass ->
+            "IPv6 traffic bypasses the tunnel. Use Android's Block connections without VPN setting when leak prevention matters."
+        WhiteDnsOptions.VpnIpv6StrategyExperimentalRoute ->
+            "Experimental IPv6 route is enabled. Some networks or apps may need fallback to Block IPv6."
+        else ->
+            "IPv6 is routed into WhiteDNS and blocked unless the VPN stack can forward it."
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(WhiteDnsPalette.SurfaceAlt)
+            .border(1.dp, WhiteDnsPalette.ControlBorder, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = strategyText,
+            color = WhiteDnsPalette.TextPrimary,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text = "For Always-on VPN, enable WhiteDNS in Android VPN settings and turn on Block connections without VPN.",
+            color = WhiteDnsPalette.TextSecondary,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
 }
 
 private fun advancedProfileSummary(profile: AdvancedSettingsProfile): String {
@@ -5865,6 +6033,10 @@ private fun displayProxyIpAddress(
         "" -> "127.0.0.1"
         else -> listenIp.trim()
     }
+}
+
+private fun generateSocksPassword(): String {
+    return UUID.randomUUID().toString().replace("-", "")
 }
 
 @Suppress("DEPRECATION")
